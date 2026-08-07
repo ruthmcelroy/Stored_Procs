@@ -1,0 +1,145 @@
+version: 2
+
+models:
+  - name: fct_daily_sales
+    description: Daily sales at the supported feed grain of summary date and product category. Warehouse is intentionally absent because the raw order feed has no warehouse assignment.
+    semantic_model:
+      enabled: true
+    agg_time_dimension: summary_date
+    metrics:
+      - name: sales_order_count
+        description: Distinct valid imported orders contributing to sales.
+        label: Sales Order Count
+        type: simple
+        agg: sum
+        expr: order_count
+      - name: units_sold
+        description: Total quantity of products sold.
+        label: Units Sold
+        type: simple
+        agg: sum
+        expr: units_sold
+      - name: gross_revenue
+        description: Revenue before allocated promotion discounts.
+        label: Gross Revenue
+        type: simple
+        agg: sum
+        expr: gross_revenue
+      - name: net_revenue
+        description: Revenue after allocated promotion discounts.
+        label: Net Revenue
+        type: simple
+        agg: sum
+        expr: net_revenue
+      - name: estimated_margin
+        description: Estimated net revenue less estimated cost.
+        label: Estimated Margin
+        type: simple
+        agg: sum
+        expr: estimated_margin
+    columns:
+      - name: summary_date
+        description: Business date parsed from the source order feed.
+        granularity: day
+        dimension:
+          type: time
+        data_tests:
+          - not_null
+      - name: category_id
+        description: Product category associated with the sold line.
+        dimension:
+          type: categorical
+        data_tests:
+          - not_null
+      - name: order_count
+        description: Distinct valid imported orders contributing to the date and category.
+        data_tests:
+          - not_null
+      - name: net_revenue
+        description: Revenue in the order currency after allocated promotion discounts.
+        data_tests:
+          - not_null
+
+  - name: dim_customer_ltv
+    description: Customer lifetime-value mart derived from valid imported orders, converted to USD using effective-dated FX rates.
+    columns:
+      - name: customer_id
+        description: Customer identifier.
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id
+      - name: ltv_segment
+        description: Legacy LTV segment using the 12000 USD VIP threshold, independent of loyalty tiers.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['VIP', 'LAPSED', 'NEW', 'REGULAR']
+      - name: total_net_spend_usd
+        description: Total valid order net revenue converted to USD.
+        data_tests:
+          - not_null
+
+  - name: fct_inventory_snapshot
+    description: Current inventory snapshot at warehouse and product grain, using the configured fallback reorder point.
+    columns:
+      - name: warehouse_id
+        description: Warehouse identifier.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_warehouses')
+                field: warehouse_id
+      - name: product_id
+        description: Product identifier.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_products')
+                field: product_id
+      - name: qty_available
+        description: On-hand quantity less allocated quantity.
+        data_tests:
+          - not_null
+      - name: is_below_reorder
+        description: Whether available plus on-order quantity is at or below the reorder point.
+        data_tests:
+          - not_null
+
+  - name: fct_low_stock_coverage
+    description: Product and warehouse rows below reorder point, enriched with product and supplier context and incoming stock coverage.
+    columns:
+      - name: warehouse_id
+        description: Warehouse identifier.
+        data_tests:
+          - not_null
+      - name: product_id
+        description: Product identifier.
+        data_tests:
+          - not_null
+      - name: qty_available
+        description: Current on-hand quantity less allocated quantity.
+        data_tests:
+          - not_null
+
+  - name: fct_product_revenue
+    description: Product-grain revenue mart replacing the legacy category-as-product reporting bug in usp_TopProductsByRevenue.
+    columns:
+      - name: product_id
+        description: Product identifier.
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_products')
+                field: product_id
+      - name: net_revenue
+        description: Product net revenue in the order currency after allocated promotion discounts.
+        data_tests:
+          - not_null
